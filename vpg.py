@@ -1,14 +1,14 @@
-#DQN on Vanilla Policy Gradient(REINFORCE)
+#Vanilla Policy Gradient(REINFORCE) on Cartpole  
 import numpy as np 
 import matplotlib.pyplot as plt
 import gymnasium as gym
-import random 
-import math
 import torch
 import torch.nn as nn
-from collections import deque
 import torch.optim as optim
+import torch.distributions as dist
 """
+This differs from Q-learning methods in the fact that we learn the policy function directly rather than optimisign for a value function
+hence we dont need e-greedy since sampling from the policy already involves stochasticity and we perform training after each episode rather than during it (like in q-learning)
 PSEUDOCODE: 1) Env setup 
 2)Network built for producing policy pi(a|s) --> takes in state features outputs probability distribution over actions
 3) exploration --> perform full trajectories based on sampling from the policy of the newtork
@@ -22,8 +22,72 @@ PSEUDOCODE: 1) Env setup
     loss.backward()
     optimizer.step()
 
+
+Hyperparamters: 1) No. of episodes
+2) learning rate 3) discount factor 4)choosing the optimiser(Adam most likely) 5) epsilon(to prevent the normalised return from have division by zero)
+
 """
 
 env = gym.make("CartPole-v1")
 n_actions = env.action_space.n
 n_states = env.observation_space.shape[0]
+
+
+class PolicyNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(n_states,256),
+            nn.ReLU(),
+            nn.Linear(256,256),
+            nn.ReLU(),
+            nn.Linear(256,n_actions), #we arent applying softmax here instead we use dist.Categorical
+        )
+    def forward(self,x):
+        out = self.network(x)
+        return out
+
+
+gamma= 0.95 
+epsilon = 1e-8
+episodes = 1000
+done = False
+policy = PolicyNet()
+optimizer = optim.Adam(policy.parameters(),lr = 0.01)
+for i in range(episodes):
+    state,_=env.reset(seed = 42)
+    done = False
+    log_probs = []
+    rewards = []
+    while not done:
+        state_tensor = torch.FloatTensor(state).unsqueeze(0) #converting the numpy array that env gives us and converting into tensor of shape(1,4)
+        logits = policy(state_tensor)
+        distribution = dist.Categorical(logits=logits)
+        action = distribution.sample() 
+        log_prob = distribution.log_prob(action)
+        log_probs.append(log_prob)
+        next_obs,reward,terminated,truncated,info = env.step(action)
+        rewards.append(reward)
+        state = next_obs
+        if terminated or truncated:
+            done = True
+    discounted_returns = []
+    G = 0
+    for r in reversed(rewards):
+        G = r + gamma * G
+        discounted_returns.insert(0, G) 
+    discounted_returns = np.array(discounted_returns)
+    normalized_returns = (discounted_returns - discounted_returns.mean()) / (discounted_returns.std() + epsilon)
+    returns = torch.FloatTensor(normalized_returns)
+    log_probs_tensor = torch.stack(log_probs)
+    loss = -torch.sum(log_probs_tensor * returns)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+
+         
+
+
+                
+    
