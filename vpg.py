@@ -37,28 +37,31 @@ class PolicyNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(n_states,256),
+            nn.Linear(n_states,128),
             nn.ReLU(),
-            nn.Linear(256,256),
+            nn.Linear(128,128),
             nn.ReLU(),
-            nn.Linear(256,n_actions), #we arent applying softmax here instead we use dist.Categorical
+            nn.Linear(128,n_actions), #we arent applying softmax here instead we use dist.Categorical
         )
     def forward(self,x):
         out = self.network(x)
         return out
 
 
-gamma= 0.95 
+gamma= 0.99
 epsilon = 1e-8
-episodes = 1000
+episodes = 4000
 done = False
 policy = PolicyNet()
-optimizer = optim.Adam(policy.parameters(),lr = 0.01)
+optimizer = optim.Adam(policy.parameters(),lr = 1e-3)
+state,_=env.reset(seed = 42)
+episode_rewards = []
 for i in range(episodes):
-    state,_=env.reset(seed = 42)
+    state,_=env.reset()
     done = False
     log_probs = []
     rewards = []
+    
     while not done:
         state_tensor = torch.FloatTensor(state).unsqueeze(0) #converting the numpy array that env gives us and converting into tensor of shape(1,4)
         logits = policy(state_tensor)
@@ -66,7 +69,7 @@ for i in range(episodes):
         action = distribution.sample() 
         log_prob = distribution.log_prob(action)
         log_probs.append(log_prob)
-        next_obs,reward,terminated,truncated,info = env.step(action)
+        next_obs,reward,terminated,truncated,info = env.step(action.item())
         rewards.append(reward)
         state = next_obs
         if terminated or truncated:
@@ -79,6 +82,9 @@ for i in range(episodes):
     discounted_returns = np.array(discounted_returns)
     normalized_returns = (discounted_returns - discounted_returns.mean()) / (discounted_returns.std() + epsilon)
     returns = torch.FloatTensor(normalized_returns)
+    episode_rewards.append(sum(rewards))
+    if i % 50 == 0:
+        print(f"Episode {i} | Avg Reward (last 50): {np.mean(episode_rewards[-50:]):.1f}")
     log_probs_tensor = torch.stack(log_probs)
     loss = -torch.sum(log_probs_tensor * returns)
     optimizer.zero_grad()
